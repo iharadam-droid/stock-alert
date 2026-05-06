@@ -44,7 +44,8 @@ def calculate_indicators(df):
     df["MA50"] = df["Close"].rolling(50).mean()
     df["MA150"] = df["Close"].rolling(150).mean()
     df["MA200"] = df["Close"].rolling(200).mean()
-    df["VolAvg50"] = df["Volume"].rolling(50).mean()  # ←追加
+    df["VolAvg50"] = df["Volume"].rolling(50).mean()
+    df["High50"] = df["High"].rolling(50).max()  # ←追加
     return df
 
 
@@ -90,7 +91,6 @@ def check_trend_template(df):
         return False, None
 
 
-# 🔥 出来高フィルター追加
 def check_volume(df):
     try:
         latest = df.iloc[-1]
@@ -110,7 +110,25 @@ def check_volume(df):
         return False, None
 
 
-def format_result(ticker, data, vol_ratio=None):
+# 🔥 50日高値ブレイク追加
+def check_breakout(df):
+    try:
+        latest = df.iloc[-1]
+
+        price = latest["Close"]
+        high50 = latest["High50"]
+
+        if pd.isna(price) or pd.isna(high50):
+            return False, None
+
+        return price >= high50, float(high50)
+
+    except Exception as e:
+        print(f"[ERROR] check_breakout failed: {e}")
+        return False, None
+
+
+def format_result(ticker, data, vol_ratio=None, high50=None):
     ratio_52w = (data["price"] / data["low_52w"] - 1) * 100
 
     base = (
@@ -122,6 +140,9 @@ def format_result(ticker, data, vol_ratio=None):
 
     if vol_ratio is not None:
         base += f"Volume Ratio: {vol_ratio:.2f}x\n"
+
+    if high50 is not None:
+        base += f"50D High: {high50:.2f}\n"
 
     return base
 
@@ -145,6 +166,7 @@ def send_to_slack(message):
 
 def main():
     trend_matches = []
+    volume_matches = []
     final_matches = []
 
     for ticker in TICKERS:
@@ -162,7 +184,11 @@ def main():
 
             vol_ok, vol_ratio = check_volume(df)
             if vol_ok:
-                final_matches.append((ticker, data, vol_ratio))
+                volume_matches.append((ticker, data, vol_ratio))
+
+                brk_ok, high50 = check_breakout(df)
+                if brk_ok:
+                    final_matches.append((ticker, data, vol_ratio, high50))
 
     # メッセージ構築
     message = "*Minervini Trend Template Matches*\n\n"
@@ -175,9 +201,17 @@ def main():
 
     message += "\n*Volume Filter Passed*\n\n"
 
-    if final_matches:
-        for ticker, data, vol_ratio in final_matches:
+    if volume_matches:
+        for ticker, data, vol_ratio in volume_matches:
             message += format_result(ticker, data, vol_ratio) + "\n"
+    else:
+        message += "該当なし\n"
+
+    message += "\n*50D Breakout (Final Matches)*\n\n"
+
+    if final_matches:
+        for ticker, data, vol_ratio, high50 in final_matches:
+            message += format_result(ticker, data, vol_ratio, high50) + "\n"
     else:
         message += "該当なし\n"
 
