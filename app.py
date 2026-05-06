@@ -19,6 +19,7 @@ TICKERS = [
     "PLTR", "SNOW"
 ]
 
+
 def fetch_data(ticker):
     try:
         end = datetime.today()
@@ -48,16 +49,25 @@ def check_trend_template(df):
     try:
         latest = df.iloc[-1]
 
-        price = latest["Close"]
-        ma50 = latest["MA50"]
-        ma150 = latest["MA150"]
-        ma200 = latest["MA200"]
+        # 🔥 float化（超重要）
+        price = float(latest["Close"])
+        ma50 = float(latest["MA50"])
+        ma150 = float(latest["MA150"])
+        ma200 = float(latest["MA200"])
+
+        # NaNガード
+        if pd.isna(ma50) or pd.isna(ma150) or pd.isna(ma200):
+            return False, None
 
         # 52週安値
-        low_52w = df["Close"].tail(252).min()
+        low_52w = float(df["Close"].tail(252).min())
 
-        # 条件4：200MAが20日上昇
-        ma200_20d_ago = df["MA200"].iloc[-21]
+        # 200MA（20日前）
+        ma200_20d_ago = float(df["MA200"].iloc[-21])
+
+        # NaNガード
+        if pd.isna(ma200_20d_ago):
+            return False, None
 
         conds = [
             price > ma150,
@@ -149,4 +159,3 @@ if __name__ == "__main__":
         print("[FATAL ERROR]")
         traceback.print_exc()
         sys.exit(1)
-      
