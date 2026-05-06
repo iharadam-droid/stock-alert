@@ -30,7 +30,6 @@ def fetch_data(ticker):
             print(f"[WARN] No data for {ticker}")
             return None
 
-        # 🔥 ここが今回の核心
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -45,6 +44,7 @@ def calculate_indicators(df):
     df["MA50"] = df["Close"].rolling(50).mean()
     df["MA150"] = df["Close"].rolling(150).mean()
     df["MA200"] = df["Close"].rolling(200).mean()
+    df["VolAvg50"] = df["Volume"].rolling(50).mean()  # ←追加
     return df
 
 
@@ -57,7 +57,6 @@ def check_trend_template(df):
         ma150 = latest["MA150"]
         ma200 = latest["MA200"]
 
-        # NaNチェック
         if pd.isna(price) or pd.isna(ma50) or pd.isna(ma150) or pd.isna(ma200):
             return False, None
 
@@ -91,15 +90,40 @@ def check_trend_template(df):
         return False, None
 
 
-def format_result(ticker, data):
-    ratio = (data["price"] / data["low_52w"] - 1) * 100
+# 🔥 出来高フィルター追加
+def check_volume(df):
+    try:
+        latest = df.iloc[-1]
 
-    return (
+        volume = latest["Volume"]
+        vol_avg = latest["VolAvg50"]
+
+        if pd.isna(volume) or pd.isna(vol_avg) or vol_avg == 0:
+            return False, None
+
+        ratio = volume / vol_avg
+
+        return ratio >= 1.1, float(ratio)
+
+    except Exception as e:
+        print(f"[ERROR] check_volume failed: {e}")
+        return False, None
+
+
+def format_result(ticker, data, vol_ratio=None):
+    ratio_52w = (data["price"] / data["low_52w"] - 1) * 100
+
+    base = (
         f"{ticker}\n"
         f"Price: {data['price']:.2f}\n"
         f"MA50: {data['ma50']:.2f} / MA150: {data['ma150']:.2f} / MA200: {data['ma200']:.2f}\n"
-        f"52W Low Diff: +{ratio:.1f}%\n"
+        f"52W Low Diff: +{ratio_52w:.1f}%\n"
     )
+
+    if vol_ratio is not None:
+        base += f"Volume Ratio: {vol_ratio:.2f}x\n"
+
+    return base
 
 
 def send_to_slack(message):
@@ -120,7 +144,8 @@ def send_to_slack(message):
 
 
 def main():
-    results = []
+    trend_matches = []
+    final_matches = []
 
     for ticker in TICKERS:
         print(f"[INFO] Processing {ticker}")
@@ -133,12 +158,28 @@ def main():
 
         ok, data = check_trend_template(df)
         if ok:
-            results.append(format_result(ticker, data))
+            trend_matches.append((ticker, data))
 
-    if results:
-        message = "*Minervini Trend Template Matches*\n\n" + "\n".join(results)
+            vol_ok, vol_ratio = check_volume(df)
+            if vol_ok:
+                final_matches.append((ticker, data, vol_ratio))
+
+    # メッセージ構築
+    message = "*Minervini Trend Template Matches*\n\n"
+
+    if trend_matches:
+        for ticker, data in trend_matches:
+            message += format_result(ticker, data) + "\n"
     else:
-        message = "No stocks matched the Minervini Trend Template today."
+        message += "No trend template matches.\n"
+
+    message += "\n*Volume Filter Passed*\n\n"
+
+    if final_matches:
+        for ticker, data, vol_ratio in final_matches:
+            message += format_result(ticker, data, vol_ratio) + "\n"
+    else:
+        message += "該当なし\n"
 
     print(message)
     send_to_slack(message)
